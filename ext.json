@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion : "2010-09-09"
+Description: Automate provisioning of codebuild with Codepipeline .
+Parameters:
+  EnvType:
+    Type: String
+    #Default: Test
+  TenantName :
+    Type: String 
+    #Default: Edp
+  PipelineArtifactsBucket :
+    Type: String    
+  GitHubOAuthToken:
+    Type: String
+    NoEcho: true
+    MinLength: 40 
+    MaxLength: 40
+    AllowedPattern: '[a-Z0-9] *'
+  GitHubOwner:
+    Type: String
+  GitHubRepo:
+    Type: String
+  GitHubBranch:
+    Type: String 
+    #Default: development-branch
+    AllowedPattern: '[A-Za-Z0-9-] *'
+  
+  CodeBuildProjectName: 
+    Type: String    
+    #Default: Edp-Dev-BuildProject  
+    
+  CodePipelineName:
+    Type: String    
+    #Default: Edp-Dev-Pipeline
+
+Resources:
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${TenantName}_${CodePipelineName}_${EnvType}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: Codepipleine.amazonaws.com
+          Action: sts:Assumerole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+  
+        
+  CodeBuildrole:
+    Type: AWS::IAM::Role    
+    Properties:
+      RoleName:
+        Fn::Sub: ${TenantName}_${CodeBuildProjectName}_${EnvType}   
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: Codebuild.amazonaws.com
+          Action: Sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  CodeBuildProject:
+    DependsOn: CodeBuildRole
+    Type: "AWS::CodeBuild::Project"        
+    Properties:
+      Name: !Ref CodeBuildProjectName
+      Description: "CodeBuild project"
+      Artifacts:
+        Type: "CODEPIPELINE"
+      Environment:
+        Type: "LINUX_CONTAINER" 
+        ComputeType: "BUILD_GENERAL1_MEDIUM"
+        Image: "aws/codebuild/standard:2.0"
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: "CODEPIPELINE" 
+        # BuildSpec: "codepipeline/buildspec.yml"  
+      TimeoutInMinutes: 10
+  
+  CodePipelineStack:
+    DependsOn: CodeBuildProject
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: EdpDevPipeline
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: PipelineArtifactsBucket
+      RestartExecutionOnUpdate: true    
+      RoleArn: !GetAtt [CodePipelineRole, Arn]
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              InputArtifacts: []
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: SourceCode
+              Configuration:
+                Owner:
+                  Ref: GitHubOwner
+                Repo:
+                  Ref: GitHubRepo
+                Branch:
+                  Ref: GitHubBranch
+                PullForSourceChanges: true  
+                OAuthToken:
+                  Ref: GitHubOAuthToken
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              InputArtifacts:
+                - Name: SourceCode
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: Buildoutput
+              Configuration:
+                ProjectName:
+                  Ref: CodeBuildProject
+              RunOrder: 1
+              
+Outputs:
+  CodeBuildURL:
+    Description: CodeBuild URL
+    Value:
+      Fn::Join:
+        - ""
+        - - "https://console.awsamazon.com/codebuild/home?region="
+          - Ref: AWS::Region
+          - "#/projects/"
+          - Ref: CodeBuildProject
+          - "/view"
+
+  CodePipelineURL:
+    Description: CodeBuild URL
+    Value:
+      Fn::Join:
+        - ""
+        - - "https://console.awsamazon.com/codebuild/home?region="
+          - Ref: AWS::Region
+          - "#/view/"
+          - Ref: CodePipelineStack               
+                    
+
+
+
+
+       
